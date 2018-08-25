@@ -151,3 +151,48 @@ func TestSite(t *testing.T) {
 		}
 	})
 }
+
+func TestUser(t *testing.T) {
+	s := initStorage(t)
+
+	const (
+		email1 = "foo@bar.com"
+		email2 = "bar@baz.fr"
+	)
+
+	userData := &caddytls.UserData{
+		Reg: []byte("reg"),
+		Key: []byte("key"),
+	}
+
+	t.Run("LoadUser", func(t *testing.T) {
+		data, err := s.LoadUser(email1)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if data != nil {
+			t.Fatal("expected no data")
+		}
+	})
+
+	t.Run("StoreUser", func(t *testing.T) {
+		err := s.StoreUser(email1, userData)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("LoadUserAfterStore", func(t *testing.T) {
+		data, err := s.LoadUser(email1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if v, exp := data.Reg, userData.Reg; !bytes.Equal(v, exp) {
+			t.Fatalf("expected reg %q to be equal to %q", string(v), string(exp))
+		}
+		if v, exp := data.Key, userData.Key; !bytes.Equal(v, exp) {
+			t.Fatalf("expected key %q to be equal to %q", string(v), string(exp))
+		}
+	})
+}

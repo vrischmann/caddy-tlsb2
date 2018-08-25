@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/FiloSottile/b2"
@@ -172,15 +173,84 @@ func (s *b2Storage) DeleteSite(domain string) error {
 }
 
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
-	panic("not implemented")
+	const op = "LoadUser"
+
+	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath(email))
+	if err != nil {
+		return nil, &Error{op: op + "/DownloadFileByName", err: err}
+	}
+	defer rd.Close()
+
+	var data caddytls.UserData
+
+	dec := json.NewDecoder(rd)
+	if err := dec.Decode(&data); err != nil {
+		return nil, &Error{op: op + "/Unmarshal", err: err}
+	}
+
+	return &data, nil
 }
 
 func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
-	panic("not implemented")
+	const op = "StoreUser"
+
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		return &Error{op: op + "/BucketByName", err: err}
+	}
+
+	buf, err := marshalTLSData(data)
+	if err != nil {
+		return &Error{op: op + "/Marshal", err: err}
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		_, err = bucket.Upload(buf, mkpath(email), "")
+		if err == nil {
+			break
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+	if err != nil {
+		return &Error{op: op + "/Upload", err: err}
+	}
+
+	return nil
 }
 
 func (s *b2Storage) MostRecentUserEmail() string {
-	panic("not implemented")
+	const op = "MostRecentUserEmail"
+
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		// Can't do anything
+		return ""
+	}
+
+	type emailWithTime struct {
+		email string
+		time  time.Time
+	}
+
+	var emails []emailWithTime
+
+	l := bucket.ListFiles("")
+	for l.Next() {
+		fi := l.FileInfo()
+
+		emails = append(emails, emailWithTime{
+			email: filepath.Base(fi.Name),
+			time:  fi.UploadTimestamp,
+		})
+	}
+
+	sort.Slice(emails, func(i, j int) bool {
+		// Reverse sort: most recent first
+		return emails[i].time.After(emails[j].time)
+	})
+
+	return emails[0].email
 }
 
 func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {

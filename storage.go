@@ -24,7 +24,7 @@ const (
 	// EnvNameAccountKey is the name of the environment variable containing the account master key or application key.
 	EnvNameAccountKey = "B2_ACCOUNT_KEY"
 
-	// EnvNameBucket is the name of the bucket used to store the files.
+	// EnvNameBucket is the bucket containing the files.
 	EnvNameBucket = "B2_BUCKET"
 )
 
@@ -54,6 +54,7 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	return &b2Storage{
 		bucketName: bucketName,
 		client:     client,
+		md:         newStorageMetadata(),
 	}, nil
 }
 
@@ -62,7 +63,7 @@ type b2Storage struct {
 	client     *b2.Client
 
 	mdMu     sync.Mutex
-	md       storageMetadata
+	md       *storageMetadata
 	mdLoaded bool
 }
 
@@ -149,6 +150,13 @@ func (s *b2Storage) Unlock(name string) error {
 type storageMetadata struct {
 	DomainNames map[string]string `json:"domainNames"`
 	Users       map[string]string `json:"users"`
+}
+
+func newStorageMetadata() *storageMetadata {
+	return &storageMetadata{
+		DomainNames: make(map[string]string),
+		Users:       make(map[string]string),
+	}
 }
 
 // it's a var so we can override it in tests.

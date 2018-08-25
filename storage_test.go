@@ -195,4 +195,16 @@ func TestUser(t *testing.T) {
 			t.Fatalf("expected key %q to be equal to %q", string(v), string(exp))
 		}
 	})
+
+	t.Run("MostRecentUserEmail", func(t *testing.T) {
+		err := s.StoreUser(email2, userData)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tmp := s.MostRecentUserEmail()
+		if tmp != email2 {
+			t.Fatalf("expected most recent user email to be %q, got %q", email2, tmp)
+		}
+	})
 }

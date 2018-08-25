@@ -1,13 +1,16 @@
 package tlsb2 // import "rischmann.fr/caddytls-b2"
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/FiloSottile/b2"
 	"github.com/mholt/caddy/caddytls"
@@ -67,6 +70,15 @@ type b2Storage struct {
 	mdLoaded bool
 }
 
+func isNotFound(err error) bool {
+	v, ok := b2.UnwrapError(err)
+	if !ok {
+		return false
+	}
+
+	return v.Status == http.StatusNotFound
+}
+
 func (s *b2Storage) loadMetadata() error {
 	s.mdMu.Lock()
 	defer s.mdMu.Unlock()
@@ -78,7 +90,10 @@ func (s *b2Storage) loadMetadata() error {
 	const op = "loadMetadata"
 
 	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath("metadata.json"))
-	if err != nil {
+	switch {
+	case err != nil && isNotFound(err):
+		return nil
+	case err != nil:
 		return &Error{op: op, err: err}
 	}
 	defer rd.Close()
@@ -105,11 +120,14 @@ func (s *b2Storage) SiteExists(domain string) (bool, error) {
 	}
 
 	_, err := s.client.GetFileInfoByID(fileID)
-	if err != nil {
+	switch {
+	case err != nil && isNotFound(err):
+		return false, nil
+	case err != nil:
 		return false, &Error{op: op, err: err}
+	default:
+		return true, nil
 	}
-
-	panic("not implemented")
 }
 
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
@@ -117,7 +135,41 @@ func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 }
 
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
-	panic("not implemented")
+	const op = "StoreSite"
+	if err := s.loadMetadata(); err != nil {
+		return &Error{op: op, err: err}
+	}
+
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		return &Error{op: op + "/BucketByName", err: err}
+	}
+
+	buf, err := marshalTLSData(data)
+	if err != nil {
+		return &Error{op: op + "/marshal", err: err}
+	}
+
+	var fi *b2.FileInfo
+	for i := 0; i < maxRetries; i++ {
+		fi, err = bucket.Upload(buf, mkpath(domain), "")
+		if err == nil {
+			break
+		}
+
+		// TODO(vincent): error checking and stuff
+
+		time.Sleep(1 * time.Second)
+	}
+	if err != nil {
+		return &Error{op: op + "/Upload", err: err}
+	}
+
+	s.mdMu.Lock()
+	s.md.DomainNames[domain] = fi.ID
+	s.mdMu.Unlock()
+
+	return nil
 }
 
 func (s *b2Storage) DeleteSite(domain string) error {
@@ -143,6 +195,8 @@ func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {
 func (s *b2Storage) Unlock(name string) error {
 	panic("not implemented")
 }
+
+const maxRetries = 5
 
 // storageMetadata contains metadata to facilitate some operations.
 // Mainly, it contains an index of domain names and users to file ids,
@@ -179,4 +233,13 @@ func (e *Error) Error() string {
 	}
 
 	return fmt.Sprintf("op:%s err:%v", e.op, e.err)
+}
+
+func marshalTLSData(d interface{}) (*bytes.Buffer, error) {
+	buf := new(bytes.Buffer)
+	enc := json.NewEncoder(buf)
+
+	err := enc.Encode(d)
+
+	return buf, err
 }

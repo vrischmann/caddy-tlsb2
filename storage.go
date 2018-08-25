@@ -1,4 +1,4 @@
-package tlsb2
+package tlsb2 // import "rischmann.fr/caddytls-b2"
 
 import (
 	"encoding/json"

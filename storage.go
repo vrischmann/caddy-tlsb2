@@ -65,6 +65,15 @@ type b2Storage struct {
 	client     *b2.Client
 }
 
+func (s *b2Storage) withBucket(op string, fn func(bucket *b2.BucketInfo) error) error {
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		return &Error{op: op + "/BucketByName", err: err}
+	}
+
+	return fn(bucket)
+}
+
 func isNotFound(err error) bool {
 	v, ok := b2.UnwrapError(err)
 	if !ok {
@@ -74,23 +83,22 @@ func isNotFound(err error) bool {
 	return v.Status == http.StatusNotFound
 }
 
-func (s *b2Storage) SiteExists(domain string) (bool, error) {
+func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 	const op = "SiteExists"
 
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		return false, &Error{op: op + "/BucketByName", err: err}
-	}
-
-	l := bucket.ListFiles("")
-	for l.Next() {
-		fi := l.FileInfo()
-		if fi.Name == mkpath(domain) {
-			return true, l.Err()
+	err = s.withBucket(op, func(b *b2.BucketInfo) error {
+		l := b.ListFiles("")
+		for l.Next() {
+			fi := l.FileInfo()
+			if fi.Name == mkpath(domain) {
+				res = true
+				break
+			}
 		}
-	}
+		return l.Err()
+	})
 
-	return false, l.Err()
+	return
 }
 
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
@@ -115,61 +123,53 @@ func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 	const op = "StoreSite"
 
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		return &Error{op: op + "/BucketByName", err: err}
-	}
-
-	buf, err := marshalTLSData(data)
-	if err != nil {
-		return &Error{op: op + "/Marshal", err: err}
-	}
-
-	for i := 0; i < maxRetries; i++ {
-		_, err = bucket.Upload(buf, mkpath(domain), "")
-		if err == nil {
-			break
+	return s.withBucket(op, func(b *b2.BucketInfo) error {
+		buf, err := marshalTLSData(data)
+		if err != nil {
+			return &Error{op: op + "/Marshal", err: err}
 		}
 
-		time.Sleep(1 * time.Second)
-	}
-	if err != nil {
-		return &Error{op: op + "/Upload", err: err}
-	}
+		for i := 0; i < maxRetries; i++ {
+			_, err = b.Upload(buf, mkpath(domain), "")
+			if err == nil {
+				break
+			}
 
-	return nil
+			time.Sleep(1 * time.Second)
+		}
+		if err != nil {
+			return &Error{op: op + "/Upload", err: err}
+		}
+
+		return nil
+	})
 }
 
 func (s *b2Storage) DeleteSite(domain string) error {
 	const op = "DeleteSite"
 
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		return &Error{op: op + "/BucketByName", err: err}
-	}
+	return s.withBucket(op, func(b *b2.BucketInfo) error {
+		name := mkpath(domain)
+		var id string
 
-	//
-
-	name := mkpath(domain)
-	var id string
-
-	l := bucket.ListFiles("")
-	for l.Next() {
-		fi := l.FileInfo()
-		if fi.Name == mkpath(domain) {
-			id = fi.ID
+		l := b.ListFiles("")
+		for l.Next() {
+			fi := l.FileInfo()
+			if fi.Name == mkpath(domain) {
+				id = fi.ID
+			}
 		}
-	}
 
-	if err := l.Err(); err != nil {
-		return &Error{op: op + "/ListFiles", err: err}
-	}
+		if err := l.Err(); err != nil {
+			return &Error{op: op + "/ListFiles", err: err}
+		}
 
-	if err := s.client.DeleteFile(id, name); err != nil {
-		return &Error{op: op + "/DeleteFile", err: err}
-	}
+		if err := s.client.DeleteFile(id, name); err != nil {
+			return &Error{op: op + "/DeleteFile", err: err}
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
@@ -194,63 +194,60 @@ func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 	const op = "StoreUser"
 
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		return &Error{op: op + "/BucketByName", err: err}
-	}
-
-	buf, err := marshalTLSData(data)
-	if err != nil {
-		return &Error{op: op + "/Marshal", err: err}
-	}
-
-	for i := 0; i < maxRetries; i++ {
-		_, err = bucket.Upload(buf, mkpath(email), "")
-		if err == nil {
-			break
+	return s.withBucket(op, func(b *b2.BucketInfo) error {
+		buf, err := marshalTLSData(data)
+		if err != nil {
+			return &Error{op: op + "/Marshal", err: err}
 		}
 
-		time.Sleep(1 * time.Second)
-	}
-	if err != nil {
-		return &Error{op: op + "/Upload", err: err}
-	}
+		for i := 0; i < maxRetries; i++ {
+			_, err = b.Upload(buf, mkpath(email), "")
+			if err == nil {
+				break
+			}
 
-	return nil
+			time.Sleep(1 * time.Second)
+		}
+		if err != nil {
+			return &Error{op: op + "/Upload", err: err}
+		}
+
+		return nil
+	})
 }
 
-func (s *b2Storage) MostRecentUserEmail() string {
+func (s *b2Storage) MostRecentUserEmail() (res string) {
 	const op = "MostRecentUserEmail"
 
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		// Can't do anything
-		return ""
-	}
+	s.withBucket(op, func(b *b2.BucketInfo) error {
+		type emailWithTime struct {
+			email string
+			time  time.Time
+		}
 
-	type emailWithTime struct {
-		email string
-		time  time.Time
-	}
+		var emails []emailWithTime
 
-	var emails []emailWithTime
+		l := b.ListFiles("")
+		for l.Next() {
+			fi := l.FileInfo()
 
-	l := bucket.ListFiles("")
-	for l.Next() {
-		fi := l.FileInfo()
+			emails = append(emails, emailWithTime{
+				email: filepath.Base(fi.Name),
+				time:  fi.UploadTimestamp,
+			})
+		}
 
-		emails = append(emails, emailWithTime{
-			email: filepath.Base(fi.Name),
-			time:  fi.UploadTimestamp,
+		sort.Slice(emails, func(i, j int) bool {
+			// Reverse sort: most recent first
+			return emails[i].time.After(emails[j].time)
 		})
-	}
 
-	sort.Slice(emails, func(i, j int) bool {
-		// Reverse sort: most recent first
-		return emails[i].time.After(emails[j].time)
+		res = emails[0].email
+
+		return nil
 	})
 
-	return emails[0].email
+	return
 }
 
 func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {

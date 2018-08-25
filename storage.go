@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/FiloSottile/b2"
@@ -57,17 +56,12 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	return &b2Storage{
 		bucketName: bucketName,
 		client:     client,
-		md:         newStorageMetadata(),
 	}, nil
 }
 
 type b2Storage struct {
 	bucketName string
 	client     *b2.Client
-
-	mdMu     sync.Mutex
-	md       *storageMetadata
-	mdLoaded bool
 }
 
 func isNotFound(err error) bool {
@@ -79,55 +73,23 @@ func isNotFound(err error) bool {
 	return v.Status == http.StatusNotFound
 }
 
-func (s *b2Storage) loadMetadata() error {
-	s.mdMu.Lock()
-	defer s.mdMu.Unlock()
-
-	if s.mdLoaded {
-		return nil
-	}
-
-	const op = "loadMetadata"
-
-	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath("metadata.json"))
-	switch {
-	case err != nil && isNotFound(err):
-		return nil
-	case err != nil:
-		return &Error{op: op, err: err}
-	}
-	defer rd.Close()
-
-	dec := json.NewDecoder(rd)
-	if err := dec.Decode(&s.md); err != nil {
-		return &Error{op: op, err: err}
-	}
-
-	s.mdLoaded = true
-
-	return nil
-}
-
 func (s *b2Storage) SiteExists(domain string) (bool, error) {
 	const op = "SiteExists"
-	if err := s.loadMetadata(); err != nil {
-		return false, &Error{op: op, err: err}
+
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		return false, &Error{op: op + "/BucketByName", err: err}
 	}
 
-	fileID, ok := s.md.DomainNames[domain]
-	if !ok {
-		return false, nil
+	l := bucket.ListFiles("")
+	for l.Next() {
+		fi := l.FileInfo()
+		if fi.Name == mkpath(domain) {
+			return true, l.Err()
+		}
 	}
 
-	_, err := s.client.GetFileInfoByID(fileID)
-	switch {
-	case err != nil && isNotFound(err):
-		return false, nil
-	case err != nil:
-		return false, &Error{op: op, err: err}
-	default:
-		return true, nil
-	}
+	return false, l.Err()
 }
 
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
@@ -136,9 +98,6 @@ func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 	const op = "StoreSite"
-	if err := s.loadMetadata(); err != nil {
-		return &Error{op: op, err: err}
-	}
 
 	bucket, err := s.client.BucketByName(s.bucketName, false)
 	if err != nil {
@@ -150,24 +109,17 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 		return &Error{op: op + "/marshal", err: err}
 	}
 
-	var fi *b2.FileInfo
 	for i := 0; i < maxRetries; i++ {
-		fi, err = bucket.Upload(buf, mkpath(domain), "")
+		_, err = bucket.Upload(buf, mkpath(domain), "")
 		if err == nil {
 			break
 		}
-
-		// TODO(vincent): error checking and stuff
 
 		time.Sleep(1 * time.Second)
 	}
 	if err != nil {
 		return &Error{op: op + "/Upload", err: err}
 	}
-
-	s.mdMu.Lock()
-	s.md.DomainNames[domain] = fi.ID
-	s.mdMu.Unlock()
 
 	return nil
 }
@@ -197,21 +149,6 @@ func (s *b2Storage) Unlock(name string) error {
 }
 
 const maxRetries = 5
-
-// storageMetadata contains metadata to facilitate some operations.
-// Mainly, it contains an index of domain names and users to file ids,
-// that way we don't have to always call b2_list_file_names.
-type storageMetadata struct {
-	DomainNames map[string]string `json:"domainNames"`
-	Users       map[string]string `json:"users"`
-}
-
-func newStorageMetadata() *storageMetadata {
-	return &storageMetadata{
-		DomainNames: make(map[string]string),
-		Users:       make(map[string]string),
-	}
-}
 
 // it's a var so we can override it in tests.
 var prefix = "caddytls"

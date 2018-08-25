@@ -111,8 +111,6 @@ func TestSite(t *testing.T) {
 	//
 
 	t.Run("LoadSite", func(t *testing.T) {
-		t.Skip()
-
 		tmp, err := s.LoadSite(domain)
 		if err != nil {
 			t.Fatal(err)
@@ -130,6 +128,26 @@ func TestSite(t *testing.T) {
 		}
 		if v, exp := tmp.Meta, siteData.Meta; !bytes.Equal(v, exp) {
 			t.Fatalf("expected meta %q to be equal to %q", string(v), string(exp))
+		}
+	})
+
+	//
+
+	t.Run("DeleteSite", func(t *testing.T) {
+		err := s.DeleteSite(domain)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("SiteExistsAfterDelete", func(t *testing.T) {
+		exists, err := s.SiteExists(domain)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if exists {
+			t.Errorf("expected site to not exists")
 		}
 	})
 }

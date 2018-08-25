@@ -93,7 +93,22 @@ func (s *b2Storage) SiteExists(domain string) (bool, error) {
 }
 
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
-	panic("not implemented")
+	const op = "LoadSite"
+
+	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath(domain))
+	if err != nil {
+		return nil, &Error{op: op + "/DownloadFileByName", err: err}
+	}
+	defer rd.Close()
+
+	var data caddytls.SiteData
+
+	dec := json.NewDecoder(rd)
+	if err := dec.Decode(&data); err != nil {
+		return nil, &Error{op: op + "/Unmarshal", err: err}
+	}
+
+	return &data, nil
 }
 
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
@@ -106,7 +121,7 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 
 	buf, err := marshalTLSData(data)
 	if err != nil {
-		return &Error{op: op + "/marshal", err: err}
+		return &Error{op: op + "/Marshal", err: err}
 	}
 
 	for i := 0; i < maxRetries; i++ {
@@ -125,7 +140,35 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 }
 
 func (s *b2Storage) DeleteSite(domain string) error {
-	panic("not implemented")
+	const op = "DeleteSite"
+
+	bucket, err := s.client.BucketByName(s.bucketName, false)
+	if err != nil {
+		return &Error{op: op + "/BucketByName", err: err}
+	}
+
+	//
+
+	name := mkpath(domain)
+	var id string
+
+	l := bucket.ListFiles("")
+	for l.Next() {
+		fi := l.FileInfo()
+		if fi.Name == mkpath(domain) {
+			id = fi.ID
+		}
+	}
+
+	if err := l.Err(); err != nil {
+		return &Error{op: op + "/ListFiles", err: err}
+	}
+
+	if err := s.client.DeleteFile(id, name); err != nil {
+		return &Error{op: op + "/DeleteFile", err: err}
+	}
+
+	return nil
 }
 
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {

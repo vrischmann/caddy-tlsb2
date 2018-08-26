@@ -4,7 +4,7 @@ This is an implementation of the [caddytls.Storage](https://github.com/mholt/cad
 
 ## Disclaimer
 
-This has not been tested thoroughly and is not production ready; use at your risk.
+This has not been tested thoroughly and is not production ready; use at your own risk.
 
 ## Prerequisites
 

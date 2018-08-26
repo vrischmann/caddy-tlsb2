@@ -1,4 +1,4 @@
-package tlsb2 // import "rischmann.fr/caddytls-b2"
+package tlsb2 // import "rischmann.fr/caddy-tlsb2"
 
 import (
 	"bytes"

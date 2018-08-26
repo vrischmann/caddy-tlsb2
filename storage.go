@@ -36,6 +36,8 @@ const (
 //
 // Credentials for b2 are read from environment variables.
 // See the constants to know their names and uses.
+//
+// NOTE: the Locker implemented by this storage is local only right now.
 func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	accountID := os.Getenv(EnvNameAccountID)
 	if accountID == "" {
@@ -86,6 +88,7 @@ func isNotFound(err error) bool {
 	return v.Status == http.StatusNotFound
 }
 
+// SiteExists returns true if the domain exists.
 func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 	const op = "SiteExists"
 
@@ -104,6 +107,7 @@ func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 	return
 }
 
+// LoadSite returns the site data for the domain provided.
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 	const op = "LoadSite"
 
@@ -123,6 +127,7 @@ func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 	return &data, nil
 }
 
+// StoreSite stored the site data for the domain provided.
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 	const op = "StoreSite"
 
@@ -148,6 +153,7 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 	})
 }
 
+// DeleteSite delete a site's data.
 func (s *b2Storage) DeleteSite(domain string) error {
 	const op = "DeleteSite"
 
@@ -175,6 +181,7 @@ func (s *b2Storage) DeleteSite(domain string) error {
 	})
 }
 
+// LoadUser returns the user data for the email provided.
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 	const op = "LoadUser"
 
@@ -194,6 +201,7 @@ func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 	return &data, nil
 }
 
+// StoreUser stores the user data for the email provided.
 func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 	const op = "StoreUser"
 
@@ -219,6 +227,7 @@ func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 	})
 }
 
+// MostRecentUserEmail returns the most recently used user email.
 func (s *b2Storage) MostRecentUserEmail() (res string) {
 	const op = "MostRecentUserEmail"
 
@@ -253,6 +262,8 @@ func (s *b2Storage) MostRecentUserEmail() (res string) {
 	return
 }
 
+// TryLock tries to take a lock.
+// WARNING: this is only a local lock right now.
 func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {
 	wg := s.waiters.forName(name)
 	if wg != nil {
@@ -264,6 +275,8 @@ func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {
 	return nil, nil
 }
 
+// Unlock removes a lock.
+// WARNING: this is only a local lock right now.
 func (s *b2Storage) Unlock(name string) error {
 	s.waiters.remove(name)
 	return nil

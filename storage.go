@@ -52,6 +52,8 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 		return nil, errors.New("no bucket set, please set $B2_BUCKET")
 	}
 
+	debugf("account ID: %q, account key: %q, bucket name: %q", accountID, accountKey, bucketName)
+
 	client, err := b2.NewClient(accountID, accountKey, nil)
 	if err != nil {
 		return nil, err
@@ -62,6 +64,14 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 		client:     client,
 		waiters:    newWaiters(),
 	}, nil
+}
+
+var debug = os.Getenv("B2_DEBUG") == "1"
+
+func debugf(format string, args ...interface{}) {
+	if debug {
+		fmt.Printf(format, args...)
+	}
 }
 
 type b2Storage struct {

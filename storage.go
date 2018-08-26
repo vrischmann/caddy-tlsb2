@@ -96,7 +96,7 @@ func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 		l := b.ListFiles("")
 		for l.Next() {
 			fi := l.FileInfo()
-			if fi.Name == mkpath(domain) {
+			if fi.Name == mkDomainPath(domain) {
 				res = true
 				break
 			}
@@ -111,7 +111,7 @@ func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 	const op = "LoadSite"
 
-	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath(domain))
+	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkDomainPath(domain))
 	if err != nil {
 		return nil, &Error{op: op + "/DownloadFileByName", err: err}
 	}
@@ -138,7 +138,7 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 		}
 
 		for i := 0; i < maxRetries; i++ {
-			_, err = b.Upload(buf, mkpath(domain), "")
+			_, err = b.Upload(buf, mkDomainPath(domain), "")
 			if err == nil {
 				break
 			}
@@ -158,13 +158,13 @@ func (s *b2Storage) DeleteSite(domain string) error {
 	const op = "DeleteSite"
 
 	return s.withBucket(op, func(b *b2.BucketInfo) error {
-		name := mkpath(domain)
+		name := mkDomainPath(domain)
 		var id string
 
 		l := b.ListFiles("")
 		for l.Next() {
 			fi := l.FileInfo()
-			if fi.Name == mkpath(domain) {
+			if fi.Name == mkDomainPath(domain) {
 				id = fi.ID
 			}
 		}
@@ -185,7 +185,7 @@ func (s *b2Storage) DeleteSite(domain string) error {
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 	const op = "LoadUser"
 
-	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkpath(email))
+	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkUserPath(email))
 	if err != nil {
 		return nil, &Error{op: op + "/DownloadFileByName", err: err}
 	}
@@ -212,7 +212,7 @@ func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 		}
 
 		for i := 0; i < maxRetries; i++ {
-			_, err = b.Upload(buf, mkpath(email), "")
+			_, err = b.Upload(buf, mkUserPath(email), "")
 			if err == nil {
 				break
 			}
@@ -289,6 +289,14 @@ var prefix = "caddytls"
 
 func mkpath(path string) string {
 	return filepath.Join(prefix, path)
+}
+
+func mkDomainPath(path string) string {
+	return mkpath(filepath.Join("domain", path))
+}
+
+func mkUserPath(path string) string {
+	return mkpath(filepath.Join("user", path))
 }
 
 // Error represents an error from tlsb2

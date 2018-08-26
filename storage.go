@@ -47,12 +47,12 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	if accountKey == "" {
 		return nil, errors.New("no account key set, please set $B2_ACCOUNT_KEY with either your master account key or an application key")
 	}
-	bucketName := os.Getenv(EnvNameBucket)
-	if bucketName == "" {
+	bucketID := os.Getenv(EnvNameBucket)
+	if bucketID == "" {
 		return nil, errors.New("no bucket set, please set $B2_BUCKET")
 	}
 
-	debugf("account ID: %q, account key: %q, bucket name: %q", accountID, accountKey, bucketName)
+	debugf("account ID: %q, account key: %q, bucket name: %q", accountID, accountKey, bucketID)
 
 	client, err := b2.NewClient(accountID, accountKey, nil)
 	if err != nil {
@@ -60,9 +60,9 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	}
 
 	return &b2Storage{
-		bucketName: bucketName,
-		client:     client,
-		waiters:    newWaiters(),
+		bucketID: bucketID,
+		client:   client,
+		waiters:  newWaiters(),
 	}, nil
 }
 
@@ -75,18 +75,36 @@ func debugf(format string, args ...interface{}) {
 }
 
 type b2Storage struct {
-	bucketName string
-	client     *b2.Client
-	waiters    *waiters
+	bucketID string
+	client   *b2.Client
+	waiters  *waiters
 }
 
-func (s *b2Storage) withBucket(op string, fn func(bucket *b2.BucketInfo) error) error {
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		return &Error{op: op + "/BucketByName", err: err}
-	}
-
+func (s *b2Storage) withBucket(op string, fn func(bucket *b2.Bucket) error) error {
+	bucket := s.client.BucketByID(s.bucketID)
 	return fn(bucket)
+}
+
+func (s *b2Storage) fetchName(op string, name string, p interface{}) error {
+	return s.withBucket(op, func(b *b2.Bucket) error {
+		fi, err := b.GetFileInfoByName(name)
+		if err != nil {
+			return &Error{op: op + "/GetFileInfoByName", err: err}
+		}
+
+		rd, _, err := s.client.DownloadFileByID(fi.ID)
+		if err != nil {
+			return &Error{op: op + "/DownloadFileByID", err: err}
+		}
+		defer rd.Close()
+
+		dec := json.NewDecoder(rd)
+		if err := dec.Decode(p); err != nil {
+			return &Error{op: op + "/Unmarshal", err: err}
+		}
+
+		return nil
+	})
 }
 
 func isNotFound(err error) bool {
@@ -102,7 +120,7 @@ func isNotFound(err error) bool {
 func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 	const op = "SiteExists"
 
-	err = s.withBucket(op, func(b *b2.BucketInfo) error {
+	err = s.withBucket(op, func(b *b2.Bucket) error {
 		l := b.ListFiles("")
 		for l.Next() {
 			fi := l.FileInfo()
@@ -121,27 +139,17 @@ func (s *b2Storage) SiteExists(domain string) (res bool, err error) {
 func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 	const op = "LoadSite"
 
-	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkDomainPath(domain))
-	if err != nil {
-		return nil, &Error{op: op + "/DownloadFileByName", err: err}
-	}
-	defer rd.Close()
+	var tmp caddytls.SiteData
+	err := s.fetchName(op, mkDomainPath(domain), &tmp)
 
-	var data caddytls.SiteData
-
-	dec := json.NewDecoder(rd)
-	if err := dec.Decode(&data); err != nil {
-		return nil, &Error{op: op + "/Unmarshal", err: err}
-	}
-
-	return &data, nil
+	return &tmp, err
 }
 
 // StoreSite stored the site data for the domain provided.
 func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 	const op = "StoreSite"
 
-	return s.withBucket(op, func(b *b2.BucketInfo) error {
+	return s.withBucket(op, func(b *b2.Bucket) error {
 		buf, err := marshalTLSData(data)
 		if err != nil {
 			return &Error{op: op + "/Marshal", err: err}
@@ -167,7 +175,7 @@ func (s *b2Storage) StoreSite(domain string, data *caddytls.SiteData) error {
 func (s *b2Storage) DeleteSite(domain string) error {
 	const op = "DeleteSite"
 
-	return s.withBucket(op, func(b *b2.BucketInfo) error {
+	return s.withBucket(op, func(b *b2.Bucket) error {
 		name := mkDomainPath(domain)
 		var id string
 
@@ -195,27 +203,17 @@ func (s *b2Storage) DeleteSite(domain string) error {
 func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 	const op = "LoadUser"
 
-	rd, _, err := s.client.DownloadFileByName(s.bucketName, mkUserPath(email))
-	if err != nil {
-		return nil, &Error{op: op + "/DownloadFileByName", err: err}
-	}
-	defer rd.Close()
+	var tmp caddytls.UserData
+	err := s.fetchName(op, mkUserPath(email), &tmp)
 
-	var data caddytls.UserData
-
-	dec := json.NewDecoder(rd)
-	if err := dec.Decode(&data); err != nil {
-		return nil, &Error{op: op + "/Unmarshal", err: err}
-	}
-
-	return &data, nil
+	return &tmp, err
 }
 
 // StoreUser stores the user data for the email provided.
 func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 	const op = "StoreUser"
 
-	return s.withBucket(op, func(b *b2.BucketInfo) error {
+	return s.withBucket(op, func(b *b2.Bucket) error {
 		buf, err := marshalTLSData(data)
 		if err != nil {
 			return &Error{op: op + "/Marshal", err: err}
@@ -241,7 +239,7 @@ func (s *b2Storage) StoreUser(email string, data *caddytls.UserData) error {
 func (s *b2Storage) MostRecentUserEmail() (res string) {
 	const op = "MostRecentUserEmail"
 
-	s.withBucket(op, func(b *b2.BucketInfo) error {
+	s.withBucket(op, func(b *b2.Bucket) error {
 		type emailWithTime struct {
 			email string
 			time  time.Time

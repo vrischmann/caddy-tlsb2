@@ -34,10 +34,7 @@ func initStorage(t *testing.T, noTruncate bool) caddytls.Storage {
 }
 
 func truncateStorage(t *testing.T, s *b2Storage) {
-	bucket, err := s.client.BucketByName(s.bucketName, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bucket := s.client.BucketByID(s.bucketID)
 
 	type fileToDelete struct {
 		name string

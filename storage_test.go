@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mholt/caddy/caddytls"
 )
@@ -17,7 +18,7 @@ func init() {
 	prefix = "test_caddytls"
 }
 
-func initStorage(t *testing.T) caddytls.Storage {
+func initStorage(t *testing.T, noTruncate bool) caddytls.Storage {
 	caURL, _ := url.Parse(testCAURL)
 
 	s, err := NewB2Storage(caURL)
@@ -25,7 +26,9 @@ func initStorage(t *testing.T) caddytls.Storage {
 		t.Fatal(err)
 	}
 
-	truncateStorage(t, s.(*b2Storage))
+	if !noTruncate {
+		truncateStorage(t, s.(*b2Storage))
+	}
 
 	return s
 }
@@ -67,7 +70,7 @@ func truncateStorage(t *testing.T, s *b2Storage) {
 }
 
 func TestSite(t *testing.T) {
-	s := initStorage(t)
+	s := initStorage(t, false)
 
 	const domain = "foobar.com"
 
@@ -153,7 +156,7 @@ func TestSite(t *testing.T) {
 }
 
 func TestUser(t *testing.T) {
-	s := initStorage(t)
+	s := initStorage(t, false)
 
 	const (
 		email1 = "foo@bar.com"
@@ -207,4 +210,44 @@ func TestUser(t *testing.T) {
 			t.Fatalf("expected most recent user email to be %q, got %q", email2, tmp)
 		}
 	})
+}
+
+func TestLocker(t *testing.T) {
+	s := initStorage(t, true)
+
+	const name = "foo"
+
+	waiter, err := s.TryLock(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiter != nil {
+		t.Fatalf("didn't expect a waiter")
+	}
+
+	time.AfterFunc(1*time.Second, func() {
+		s.Unlock(name)
+	})
+
+	//
+
+	waiter, err = s.TryLock(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiter == nil {
+		t.Fatalf("expected a waiter")
+	}
+
+	waiter.Wait()
+
+	//
+
+	waiter, err = s.TryLock(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiter != nil {
+		t.Fatalf("didn't expect a wait")
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/FiloSottile/b2"
@@ -57,12 +58,14 @@ func NewB2Storage(caURL *url.URL) (caddytls.Storage, error) {
 	return &b2Storage{
 		bucketName: bucketName,
 		client:     client,
+		waiters:    newWaiters(),
 	}, nil
 }
 
 type b2Storage struct {
 	bucketName string
 	client     *b2.Client
+	waiters    *waiters
 }
 
 func (s *b2Storage) withBucket(op string, fn func(bucket *b2.BucketInfo) error) error {
@@ -251,11 +254,19 @@ func (s *b2Storage) MostRecentUserEmail() (res string) {
 }
 
 func (s *b2Storage) TryLock(name string) (caddytls.Waiter, error) {
-	panic("not implemented")
+	wg := s.waiters.forName(name)
+	if wg != nil {
+		return wg, nil
+	}
+
+	s.waiters.add(name)
+
+	return nil, nil
 }
 
 func (s *b2Storage) Unlock(name string) error {
-	panic("not implemented")
+	s.waiters.remove(name)
+	return nil
 }
 
 const maxRetries = 5
@@ -289,4 +300,45 @@ func marshalTLSData(d interface{}) (*bytes.Buffer, error) {
 	err := enc.Encode(d)
 
 	return buf, err
+}
+
+type waiters struct {
+	mu  sync.Mutex
+	wgs map[string]*sync.WaitGroup
+}
+
+func newWaiters() *waiters {
+	return &waiters{
+		wgs: make(map[string]*sync.WaitGroup),
+	}
+}
+
+func (w *waiters) forName(name string) *sync.WaitGroup {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.wgs[name]
+}
+
+func (w *waiters) add(name string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
+
+	w.wgs[name] = wg
+}
+
+func (w *waiters) remove(name string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	wg, ok := w.wgs[name]
+	if !ok {
+		return
+	}
+
+	wg.Done()
+	delete(w.wgs, name)
 }

@@ -140,8 +140,11 @@ func (s *b2Storage) LoadSite(domain string) (*caddytls.SiteData, error) {
 	const op = "LoadSite"
 
 	var tmp caddytls.SiteData
-	err := s.fetchName(op, mkDomainPath(domain), &tmp)
 
+	err := s.fetchName(op, mkDomainPath(domain), &tmp)
+	if err != nil {
+		return nil, err
+	}
 	return &tmp, err
 }
 
@@ -204,8 +207,11 @@ func (s *b2Storage) LoadUser(email string) (*caddytls.UserData, error) {
 	const op = "LoadUser"
 
 	var tmp caddytls.UserData
-	err := s.fetchName(op, mkUserPath(email), &tmp)
 
+	err := s.fetchName(op, mkUserPath(email), &tmp)
+	if err != nil {
+		return nil, err
+	}
 	return &tmp, err
 }
 

@@ -1,5 +1,9 @@
 # caddy-tlsb2
 
+**NOTE**: Caddy changed the way TLS storage works with a new interface [caddytls.ClusterPluginConstructor](https://godoc.org/github.com/mholt/caddy/caddytls#ClusterPluginConstructor).
+
+I plan to update this module in the future. `v1.0.0` is the tag you'll want to use if you're still using Caddy up to `v0.11.1`.
+
 This is an implementation of the [caddytls.Storage](https://github.com/mholt/caddy/blob/master/caddytls/storage.go#L69) interface using Backblaze's B2 Cloud Storage.
 
 ## Disclaimer
